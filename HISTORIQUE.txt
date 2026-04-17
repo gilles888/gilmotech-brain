@@ -180,6 +180,47 @@ CE QUI RESTE À FAIRE SUR LE VPS
      (remplacer BRAIN_SECRET_TOKEN par une vraie valeur dans le conf Nginx)
   6. ./deploy.sh pour le premier lancement
 
+--------------------------------------------------------------------------------
+SESSION 2 — 2026-04-17 : DÉPLOIEMENT COMPLET SUR VPS
+--------------------------------------------------------------------------------
+
+CONTEXTE
+  Déploiement de GilmoBrain sur le VPS vmi2936009 (45.88.223.242).
+  Suite directe de la session 1 (création du projet).
+
+DÉCISIONS TECHNIQUES
+  - Redis installé via apt (redis-server)
+  - Certificat SSL généré avec certbot --nginx
+  - DNS brain.gilmotech.be créé chez OVH (A → 45.88.223.242)
+  - Token secret Nginx : 02a6a705683c7622fe71632559b3ec8b0a03d32cb7a9fe9d2419f02d459fca51
+  - Script test-api.sh créé pour valider l'API
+
+ACTIONS RÉALISÉES
+  1. apt install redis-server + systemctl enable/start
+  2. mkdir /opt/brain-sandbox
+  3. Copie gilmotech-brain.service → /etc/systemd/system/
+  4. ./deploy.sh → brain.jar déployé sur port 4000
+  5. Nginx configuré + certbot SSL pour brain.gilmotech.be
+  6. Token secret ajouté dans la config Nginx
+  7. Entrée DNS A créée chez OVH
+
+FICHIERS MODIFIÉS / CRÉÉS
+  test-api.sh
+    → Script bash pour tester /api/health et /api/agent/run
+
+RÉSULTATS DU TEST FINAL
+  → Health : UP, 11 tools disponibles
+  → Météo Bruxelles : 19.4°C, ciel dégagé, humidité 53%
+  → Tool utilisé : weather_current
+  → Durée : 370ms
+  → URL : https://brain.gilmotech.be
+
+CE QUI RESTE À FAIRE
+  - Créer les agents slash commands manquants (/test, /deploy, /add-tool, /log, /check)
+    → Déjà créés mais interrompus, à vérifier
+  - Connecter FamilyChat à l'API
+  - Connecter OpenHands à l'API
+
 ================================================================================
 COMMENT REPRENDRE CE PROJET DANS UNE FUTURE SESSION
 ================================================================================
