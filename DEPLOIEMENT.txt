@@ -1,0 +1,233 @@
+================================================================================
+GILMOBRAIN — GUIDE DE DÉPLOIEMENT
+Date : 2026-04-17
+================================================================================
+
+PORT RETENU : 4000
+Raison : Premier port libre parmi (4000, 4001, 4002, 4100).
+         8081 et 8082 occupés par d'autres apps Java sur le VPS.
+
+--------------------------------------------------------------------------------
+PORTS OCCUPÉS SUR LE VPS AU MOMENT DE LA CRÉATION
+--------------------------------------------------------------------------------
+80 / 443    → Nginx
+8000        → Nginx (proxy)
+8081        → HygieneCheck (Java)
+8082        → Java (autre app)
+5432        → PostgreSQL
+22          → SSH
+
+--------------------------------------------------------------------------------
+CLÉS API NÉCESSAIRES
+--------------------------------------------------------------------------------
+GROQ_API_KEY        → https://console.groq.com/keys
+                      (gratuit, modèle llama-3.3-70b-versatile)
+
+BRAVE_API_KEY       → https://api.search.brave.com/app/keys
+                      (gratuit 2 000 requêtes/mois)
+
+OPENWEATHER_API_KEY → https://home.openweathermap.org/api_keys
+                      (gratuit 1 000 requêtes/jour)
+
+Fichier à remplir : /opt/gilmotech-brain/.env
+  GROQ_API_KEY=sk-à-remplacer
+  BRAVE_API_KEY=à-remplacer
+  OPENWEATHER_API_KEY=à-remplacer
+  PORT_BRAIN=4000
+
+--------------------------------------------------------------------------------
+INSTALLATION COMPLÈTE (en root sur le VPS)
+--------------------------------------------------------------------------------
+
+ÉTAPE 1 — Redis
+  apt install redis-server -y
+  systemctl enable redis-server
+  systemctl start redis-server
+  redis-cli ping   → doit répondre PONG
+
+ÉTAPE 2 — Sandbox
+  mkdir -p /opt/brain-sandbox
+  chmod 755 /opt/brain-sandbox
+
+ÉTAPE 3 — Clés API
+  nano /opt/gilmotech-brain/.env
+  (remplir les 3 clés)
+
+ÉTAPE 4 — Service systemd
+  cp /opt/gilmotech-brain/gilmotech-brain.service /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable gilmotech-brain
+
+ÉTAPE 5 — Nginx + SSL
+  cp /opt/gilmotech-brain/nginx-gilmotech-brain.conf \
+     /etc/nginx/sites-available/gilmotech-brain
+  ln -s /etc/nginx/sites-available/gilmotech-brain \
+        /etc/nginx/sites-enabled/
+  nginx -t && systemctl reload nginx
+  certbot --nginx -d brain.gilmotech.be
+
+ÉTAPE 6 — Premier déploiement
+  cd /opt/gilmotech-brain
+  ./deploy.sh
+
+--------------------------------------------------------------------------------
+DÉPLOIEMENT (après modification du code)
+--------------------------------------------------------------------------------
+  cd /opt/gilmotech-brain
+  ./deploy.sh
+
+  Le script fait automatiquement :
+  1. mvn clean package -DskipTests
+  2. cp target/brain.jar /opt/gilmotech-brain/
+  3. systemctl restart gilmotech-brain
+
+--------------------------------------------------------------------------------
+COMMANDES UTILES
+--------------------------------------------------------------------------------
+
+Statut du service :
+  systemctl status gilmotech-brain
+
+Logs en temps réel :
+  journalctl -u gilmotech-brain -f
+
+Redémarrer :
+  systemctl restart gilmotech-brain
+
+Vérifier le port :
+  ss -tlnp | grep 4000
+
+Tester Redis :
+  redis-cli ping
+
+--------------------------------------------------------------------------------
+ENDPOINTS API
+--------------------------------------------------------------------------------
+
+POST   /api/agent/run              → Lancer une tâche agent
+GET    /api/agent/memory/{id}      → Lire l'historique d'une session
+DELETE /api/agent/memory/{id}      → Supprimer une session
+GET    /api/health                 → Statut du service
+
+Header obligatoire sur toutes les requêtes via Nginx :
+  X-Brain-Token: BRAIN_SECRET_TOKEN
+
+  (remplacer BRAIN_SECRET_TOKEN par une vraie valeur secrète
+   dans /etc/nginx/sites-available/gilmotech-brain)
+
+--------------------------------------------------------------------------------
+EXEMPLES CURL
+--------------------------------------------------------------------------------
+
+Health check :
+  curl https://brain.gilmotech.be/api/health \
+    -H "X-Brain-Token: BRAIN_SECRET_TOKEN"
+
+Météo à Bruxelles :
+  curl -X POST https://brain.gilmotech.be/api/agent/run \
+    -H "Content-Type: application/json" \
+    -H "X-Brain-Token: BRAIN_SECRET_TOKEN" \
+    -d '{
+      "task": "Quel temps fait-il à Bruxelles ?",
+      "sessionId": "test-001",
+      "mode": "conversation"
+    }'
+
+Recherche web :
+  curl -X POST https://brain.gilmotech.be/api/agent/run \
+    -H "Content-Type: application/json" \
+    -H "X-Brain-Token: BRAIN_SECRET_TOKEN" \
+    -d '{
+      "task": "Cherche les dernières nouvelles sur l'\''IA",
+      "sessionId": "test-002",
+      "mode": "conversation"
+    }'
+
+Mode développeur :
+  curl -X POST https://brain.gilmotech.be/api/agent/run \
+    -H "Content-Type: application/json" \
+    -H "X-Brain-Token: BRAIN_SECRET_TOKEN" \
+    -d '{
+      "task": "Crée un script Python qui affiche la date du jour",
+      "sessionId": "dev-001",
+      "mode": "code"
+    }'
+
+Historique de session :
+  curl https://brain.gilmotech.be/api/agent/memory/test-001 \
+    -H "X-Brain-Token: BRAIN_SECRET_TOKEN"
+
+Supprimer une session :
+  curl -X DELETE https://brain.gilmotech.be/api/agent/memory/test-001 \
+    -H "X-Brain-Token: BRAIN_SECRET_TOKEN"
+
+--------------------------------------------------------------------------------
+TOOLS DISPONIBLES POUR L'IA
+--------------------------------------------------------------------------------
+  web_search        → Recherche Brave (5 résultats)
+  bash_execute      → Commande bash dans /opt/brain-sandbox
+  file_read         → Lire un fichier sandbox
+  file_write        → Écrire un fichier sandbox
+  file_list         → Lister un répertoire sandbox
+  weather_current   → Météo actuelle (OpenWeatherMap)
+  weather_forecast  → Prévisions météo (8 créneaux)
+  memory_remember   → Stocker une info clé-valeur (Redis)
+  memory_recall     → Récupérer une info mémorisée
+  memory_forget     → Supprimer une info mémorisée
+  memory_list       → Lister toutes les mémoires
+
+--------------------------------------------------------------------------------
+MODES AGENT
+--------------------------------------------------------------------------------
+  conversation  → Assistant bienveillant, réponses en français
+  code          → Expert Angular/Spring Boot/Java/TypeScript/NestJS
+
+--------------------------------------------------------------------------------
+STRUCTURE DU PROJET
+--------------------------------------------------------------------------------
+gilmotech-brain/
+├── pom.xml
+├── deploy.sh                        ← script de déploiement
+├── .env                             ← clés API (NE PAS COMMITTER)
+├── gilmotech-brain.service          ← à copier dans /etc/systemd/system/
+├── nginx-gilmotech-brain.conf       ← à copier dans /etc/nginx/sites-available/
+├── DEPLOIEMENT.txt                  ← ce fichier
+└── src/main/java/be/gilmotech/brain/
+    ├── BrainApplication.java
+    ├── config/AppConfig.java         ← CORS + RestTemplate
+    ├── groq/
+    │   ├── GroqClient.java           ← appels HTTP Groq
+    │   ├── GroqMessage.java
+    │   ├── GroqTool.java
+    │   ├── GroqResponse.java
+    │   └── ToolCall.java
+    ├── tools/
+    │   ├── ToolsRegistry.java        ← registre central (dispatcher)
+    │   ├── WebSearchTool.java        ← Brave Search
+    │   ├── BashTool.java             ← bash sandbox + blacklist
+    │   ├── FileTool.java             ← read/write/list sandbox
+    │   ├── WeatherTool.java          ← OpenWeatherMap
+    │   └── MemoryTool.java           ← Redis key-value
+    ├── memory/
+    │   ├── MemoryService.java        ← historique sessions Redis
+    │   └── ConversationEntry.java
+    └── agent/
+        ├── AgentController.java      ← endpoints REST
+        ├── AgentService.java         ← boucle ReAct (max 10 tours)
+        └── AgentRequest.java
+
+--------------------------------------------------------------------------------
+RÉSULTATS DES TESTS
+--------------------------------------------------------------------------------
+  BashToolTest  : 6/6 tests OK
+  FileToolTest  : 5/5 tests OK
+  BUILD SUCCESS : brain.jar (31 MB) généré dans target/
+
+  Tests couverts :
+  - Blacklist bash (rm -rf /, sudo, shutdown, wget IPs privées)
+  - Sandbox bash (working directory = /opt/brain-sandbox)
+  - Path traversal bloqué (../../etc/passwd, /etc/passwd)
+  - Lecture/écriture/liste fichiers sandbox
+  - Création de sous-répertoires automatique
+
+================================================================================

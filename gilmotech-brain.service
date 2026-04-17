@@ -1,0 +1,14 @@
+[Unit]
+Description=GilmoBrain AI Service
+After=network.target redis.service
+
+[Service]
+User=www-data
+WorkingDirectory=/opt/gilmotech-brain
+ExecStart=/home/claude-worker/tools/jdk-21.0.5+11/bin/java -jar brain.jar
+EnvironmentFile=/opt/gilmotech-brain/.env
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

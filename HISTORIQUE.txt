@@ -1,0 +1,206 @@
+================================================================================
+GILMOBRAIN — HISTORIQUE DES CHANGEMENTS
+================================================================================
+Dernière mise à jour : 2026-04-17
+================================================================================
+
+--------------------------------------------------------------------------------
+SESSION 1 — 2026-04-17 : CRÉATION COMPLÈTE DU PROJET
+--------------------------------------------------------------------------------
+
+CONTEXTE
+  Création from scratch du projet GilmoBrain.
+  API Spring Boot centrale pour orchestrer les interactions IA du VPS vmi2936009.
+  Sert de backend partagé entre FamilyChat (Next.js) et OpenHands.
+
+DÉCISIONS TECHNIQUES
+  - Port 4000 choisi (4000, 4001, 4002, 4100 étaient tous libres)
+    8081 et 8082 occupés par d'autres apps Java.
+  - Java 21 trouvé sur le VPS : /home/claude-worker/tools/jdk-21.0.5+11/bin/java
+  - Maven trouvé sur le VPS : /home/claude-worker/tools/apache-maven-3.9.6/bin/mvn
+  - Redis était inactif → instructions d'installation dans DEPLOIEMENT.txt
+
+FICHIERS CRÉÉS
+  pom.xml
+    → Spring Boot 3.2.5, Java 21
+    → Dépendances : web, data-redis, validation, lombok, jackson, devtools
+    → JAR final nommé "brain"
+
+  src/main/resources/application.properties
+    → Port 4000 via variable PORT_BRAIN
+    → Config Groq, Redis, Brave Search, OpenWeatherMap, sandbox, CORS
+
+  src/main/java/be/gilmotech/brain/BrainApplication.java
+    → Point d'entrée Spring Boot
+
+  src/main/java/be/gilmotech/brain/config/AppConfig.java
+    → Bean RestTemplate
+    → CORS configuré pour familychat.gilmotech.be et localhost:3000
+
+  src/main/java/be/gilmotech/brain/groq/GroqMessage.java
+    → Record avec : role, content, toolCallId, toolCalls, name
+    → Annotations @JsonInclude et @JsonProperty pour le format Groq
+
+  src/main/java/be/gilmotech/brain/groq/GroqTool.java
+    → Record imbriqué : GroqTool > Function(name, description, parameters)
+    → Constructeur raccourci (name, description, parameters)
+
+  src/main/java/be/gilmotech/brain/groq/ToolCall.java
+    → Record : id, type, Function(name, arguments)
+    → Arguments stockés en String JSON brut (format Groq)
+
+  src/main/java/be/gilmotech/brain/groq/GroqResponse.java
+    → Record : content, toolCalls, finishReason
+
+  src/main/java/be/gilmotech/brain/groq/GroqClient.java
+    → Appels HTTP via RestTemplate
+    → chat() : appel simple sans tools
+    → chatWithTools() : appel avec tools, parse tool_calls dans la réponse
+    → Logs debug sur chaque appel
+
+  src/main/java/be/gilmotech/brain/tools/WebSearchTool.java
+    → Brave Search API
+    → search(query) → List<SearchResult> (5 résultats max)
+    → Header X-Subscription-Token
+    → Record SearchResult(title, url, description)
+
+  src/main/java/be/gilmotech/brain/tools/BashTool.java
+    → execute(command) → BashResult(stdout, stderr, exitCode, timedOut)
+    → Working directory forcé sur /opt/brain-sandbox
+    → Timeout 30 secondes (ProcessBuilder)
+    → Blacklist : rm -rf /, sudo, chmod 777, shutdown, reboot, kill,
+                  wget/curl vers IPs privées (10.x, 192.x, 172.x),
+                  > /dev/, dd if=, mkfs, fdisk, parted
+
+  src/main/java/be/gilmotech/brain/tools/FileTool.java
+    → readFile(path), writeFile(path, content), listFiles(path)
+    → Protection path traversal : vérifie que le chemin résolu
+      commence bien par /opt/brain-sandbox
+    → Crée les sous-répertoires automatiquement à l'écriture
+
+  src/main/java/be/gilmotech/brain/tools/WeatherTool.java
+    → getWeather(city) → WeatherResult(city, temp, feelsLike,
+                                       description, humidity, windSpeed)
+    → getForecast(city) → List<ForecastResult>(dateTime, temp, description)
+    → OpenWeatherMap API, paramètres units=metric&lang=fr
+
+  src/main/java/be/gilmotech/brain/tools/MemoryTool.java
+    → remember(key, value, ttlSeconds), recall(key), forget(key), listMemories()
+    → Préfixe Redis : "brain:memory:"
+    → TTL optionnel (null = pas d'expiration)
+
+  src/main/java/be/gilmotech/brain/tools/ToolsRegistry.java
+    → Registre central de tous les tools
+    → getGroqTools() → expose 11 tools à l'IA Groq avec leurs schémas JSON
+    → executeTool(name, argumentsJson) → dispatcher vers le bon tool
+    → Log de chaque appel (nom + durée + résultat tronqué à 100 chars)
+    → 11 tools : web_search, bash_execute, file_read, file_write, file_list,
+                 weather_current, weather_forecast, memory_remember,
+                 memory_recall, memory_forget, memory_list
+
+  src/main/java/be/gilmotech/brain/memory/ConversationEntry.java
+    → Record simple : role, content, toolCallId
+
+  src/main/java/be/gilmotech/brain/memory/MemoryService.java
+    → getHistory(sessionId) → List<GroqMessage> (max 20 messages)
+    → saveHistory(sessionId, messages) → stocke en Redis, TTL 24h
+    → deleteHistory(sessionId)
+    → Préfixe Redis : "brain:session:"
+
+  src/main/java/be/gilmotech/brain/agent/AgentRequest.java
+    → Record : task, sessionId, mode
+    → resolvedMode() : retourne "conversation" si mode null/vide
+
+  src/main/java/be/gilmotech/brain/agent/AgentService.java
+    → Boucle ReAct complète (max 10 itérations)
+    → Charge l'historique Redis → ajoute la tâche → boucle Groq/tools
+    → Sauvegarde l'historique après chaque run
+    → 2 modes : "conversation" (assistant bienveillant) / "code" (dev expert)
+    → Retourne AgentResult(response, sessionId, toolsUsed, durationMs)
+
+  src/main/java/be/gilmotech/brain/agent/AgentController.java
+    → POST   /api/agent/run
+    → GET    /api/agent/memory/{sessionId}
+    → DELETE /api/agent/memory/{sessionId}
+    → GET    /api/health (retourne status, model, port, toolsAvailable)
+
+  src/test/java/be/gilmotech/brain/BrainApplicationTests.java
+    → Test de chargement du contexte Spring
+
+  src/test/java/be/gilmotech/brain/tools/BashToolTest.java
+    → 6 tests : blacklist (rm -rf /, sudo, shutdown, wget IP privée),
+                commande simple, vérification du working directory
+
+  src/test/java/be/gilmotech/brain/tools/FileToolTest.java
+    → 5 tests : write+read, listFiles, path traversal relatif (../../),
+                path traversal absolu (/etc/passwd), sous-répertoires
+
+  src/test/java/be/gilmotech/brain/agent/AgentControllerTest.java
+    → 3 tests WebMvc (mock Groq) : /health, /agent/run, DELETE /memory
+
+  .env
+    → Variables d'environnement (clés API à remplir)
+    → NE PAS COMMITTER ce fichier
+
+  gilmotech-brain.service
+    → Fichier systemd à copier dans /etc/systemd/system/
+    → ExecStart pointe sur Java 21 du VPS
+
+  nginx-gilmotech-brain.conf
+    → Config Nginx pour brain.gilmotech.be
+    → Redirect HTTP → HTTPS
+    → proxy_pass vers 127.0.0.1:4000
+    → Protection par header X-Brain-Token (retourne 403 si absent)
+
+  deploy.sh
+    → Build Maven + copie JAR + restart systemd
+    → Utilise les chemins Java/Maven trouvés sur le VPS
+
+  README.md
+    → Doc complète : port, ports occupés, clés API, installation, exemples curl
+
+  DEPLOIEMENT.txt
+    → Guide détaillé étape par étape pour déployer sur le VPS
+
+  HISTORIQUE.txt
+    → Ce fichier
+
+RÉSULTATS
+  → BUILD SUCCESS : target/brain.jar (31 MB)
+  → 11/11 tests unitaires OK (BashToolTest + FileToolTest)
+  → Tests AgentControllerTest non lancés (besoin Redis pour SpringBootTest)
+
+CE QUI RESTE À FAIRE SUR LE VPS
+  1. apt install redis-server -y && systemctl enable --now redis-server
+  2. mkdir -p /opt/brain-sandbox && chmod 755 /opt/brain-sandbox
+  3. Remplir les 3 clés API dans /opt/gilmotech-brain/.env
+  4. cp gilmotech-brain.service /etc/systemd/system/
+     systemctl daemon-reload && systemctl enable gilmotech-brain
+  5. Configurer Nginx + certbot pour brain.gilmotech.be
+     (remplacer BRAIN_SECRET_TOKEN par une vraie valeur dans le conf Nginx)
+  6. ./deploy.sh pour le premier lancement
+
+================================================================================
+COMMENT REPRENDRE CE PROJET DANS UNE FUTURE SESSION
+================================================================================
+
+  1. Lire ce fichier :
+       cat /opt/gilmotech-brain/HISTORIQUE.txt
+
+  2. Lire le guide de déploiement :
+       cat /opt/gilmotech-brain/DEPLOIEMENT.txt
+
+  3. Voir tous les fichiers source :
+       find /opt/gilmotech-brain/src -name "*.java" | sort
+
+  4. Relancer un build :
+       cd /opt/gilmotech-brain
+       JAVA_HOME=/home/claude-worker/tools/jdk-21.0.5+11 \
+         /home/claude-worker/tools/apache-maven-3.9.6/bin/mvn clean package -DskipTests
+
+  5. Lancer les tests unitaires :
+       JAVA_HOME=/home/claude-worker/tools/jdk-21.0.5+11 \
+         /home/claude-worker/tools/apache-maven-3.9.6/bin/mvn test \
+         -Dtest="BashToolTest,FileToolTest"
+
+================================================================================
