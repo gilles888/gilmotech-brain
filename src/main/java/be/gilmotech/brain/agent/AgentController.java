@@ -3,6 +3,8 @@ package be.gilmotech.brain.agent;
 import be.gilmotech.brain.groq.GroqMessage;
 import be.gilmotech.brain.memory.MemoryService;
 import be.gilmotech.brain.tools.ToolsRegistry;
+import be.gilmotech.brain.users.AuthService;
+import be.gilmotech.brain.users.User;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +24,7 @@ public class AgentController {
     private final AgentService agentService;
     private final MemoryService memoryService;
     private final ToolsRegistry toolsRegistry;
+    private final AuthService authService;
 
     @Value("${server.port:4000}")
     private String serverPort;
@@ -30,8 +33,19 @@ public class AgentController {
     private String groqModel;
 
     @PostMapping("/agent/run")
-    public ResponseEntity<Map<String, Object>> run(@Valid @RequestBody AgentRequest request) {
-        log.info("AgentController: POST /agent/run session={} mode={}", request.sessionId(), request.resolvedMode());
+    public ResponseEntity<Map<String, Object>> run(
+            @Valid @RequestBody AgentRequest request,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String userId = null;
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            try {
+                User user = authService.validateToken(authHeader.substring(7));
+                userId = user.getId();
+            } catch (Exception e) {
+                return ResponseEntity.status(401).body(Map.of("error", "Token invalide"));
+            }
+        }
+        log.info("AgentController: POST /agent/run session={} mode={} userId={}", request.sessionId(), request.resolvedMode(), userId);
         AgentService.AgentResult result = agentService.run(request.task(), request.sessionId(), request.resolvedMode());
         return ResponseEntity.ok(Map.of(
                 "response", result.response() != null ? result.response() : "",

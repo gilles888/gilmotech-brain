@@ -32,14 +32,20 @@ public class GroqClient {
     private String model;
 
     public String chat(String systemPrompt, List<GroqMessage> messages) {
-        GroqResponse response = chatWithTools(systemPrompt, messages, null);
+        GroqResponse response = chatWithTools(systemPrompt, messages, null, 0.3, 2048);
         return response.content();
     }
 
     public GroqResponse chatWithTools(String systemPrompt, List<GroqMessage> messages, List<GroqTool> tools) {
+        return chatWithTools(systemPrompt, messages, tools, 0.3, 2048);
+    }
+
+    public GroqResponse chatWithTools(String systemPrompt, List<GroqMessage> messages, List<GroqTool> tools, double temperature, int maxTokens) {
         try {
             ObjectNode body = objectMapper.createObjectNode();
             body.put("model", model);
+            body.put("temperature", temperature);
+            body.put("max_tokens", maxTokens);
 
             ArrayNode msgs = objectMapper.createArrayNode();
 

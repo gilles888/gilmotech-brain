@@ -221,6 +221,132 @@ CE QUI RESTE À FAIRE
   - Connecter FamilyChat à l'API
   - Connecter OpenHands à l'API
 
+--------------------------------------------------------------------------------
+SESSION 3 — 2026-04-18 : SYSTEM PROMPTS VILVORDE + MODE RESEARCH + DEEPSEEK
+--------------------------------------------------------------------------------
+
+CONTEXTE
+  Amélioration des system prompts pour les deux utilisateurs de la famille Moreau.
+  Problèmes constatés : réponses trop vagues, web_search pas assez utilisé.
+  Ajout d'un troisième mode "research" pour les analyses approfondies avec sources.
+
+DÉCISIONS TECHNIQUES
+  - Prompts réécrits avec règles de recherche explicites ("pour TOUTE question sur X → utilise tool Y")
+  - Mode "conversation" (Riri) : contexte Vilvorde/Belgique ancré, instructions administratif belge
+  - Mode "code" (Gil) : stack complet documenté (Angular 18/20, Spring Boot 3, VPS, Raspberry Pi 5...)
+  - Mode "research" (nouveau) : min 3 web_search par réponse, structure fixe avec sources
+  - Paramètres Groq ajustés par mode (temperature + max_tokens) via surcharge de chatWithTools()
+  - Modèle changé : llama-3.3-70b-versatile → deepseek-r1-distill-llama-70b
+  - Java text blocks utilisés pour les system prompts (lisibilité, Java 21)
+
+FICHIERS MODIFIÉS
+  src/main/resources/application.properties
+    → groq.model = deepseek-r1-distill-llama-70b
+
+  src/main/java/be/gilmotech/brain/agent/AgentService.java
+    → SYSTEM_CONVERSATION : prompt détaillé avec contexte Vilvorde + règles recherche Riri
+    → SYSTEM_CODE : prompt détaillé avec stack Gil + règles recherche dev
+    → SYSTEM_RESEARCH (nouveau) : min 3 web_search, structure imposée, sources citées
+    → record ModeParams(systemPrompt, temperature, maxTokens)
+    → resolveParams(mode) : switch vers les bons paramètres par mode
+    → Appel chatWithTools() avec temperature et maxTokens explicites
+
+  src/main/java/be/gilmotech/brain/groq/GroqClient.java
+    → Nouvelle surcharge : chatWithTools(systemPrompt, messages, tools, temperature, maxTokens)
+    → Ancienne signature conservée (appelle la nouvelle avec valeurs par défaut 0.3/2048)
+    → body.put("temperature") + body.put("max_tokens") ajoutés
+
+RÉSULTATS
+  → BUILD SUCCESS (21s)
+  → Service redémarré via deploy.sh
+  → Tests unitaires non relancés (pas de changement dans BashTool/FileTool)
+
+PARAMÈTRES PAR MODE
+  conversation : temperature=0.3, max_tokens=2048
+  code         : temperature=0.1, max_tokens=4096
+  research     : temperature=0.2, max_tokens=3000
+
+CE QUI RESTE À FAIRE
+  - Connecter FamilyChat à l'API GilmoBrain
+  - Connecter OpenHands à l'API
+
+--------------------------------------------------------------------------------
+SESSION 3 (suite) — 2026-04-18 : MODE RESEARCH DANS FAMILYCHAT
+--------------------------------------------------------------------------------
+
+FICHIERS MODIFIÉS
+  /opt/familychat/types/chat.ts
+    → ChatMode étendu : 'conversation' | 'code' | 'research'
+
+  /opt/familychat/components/ModeSwitch.tsx
+    → Bouton "Recherche" ajouté (icône loupe, couleur blue-100/blue-700)
+
+RÉSULTATS
+  → Build Next.js OK
+  → PM2 restart familychat OK (pid 2565187)
+
+CE QUI RESTE À FAIRE (session 3 suite)
+  - Connecter FamilyChat à l'API GilmoBrain → FAIT en session 4
+  - Connecter OpenHands à l'API
+
+--------------------------------------------------------------------------------
+SESSION 4 — 2026-04-18 : SYSTÈME MULTI-UTILISATEURS COMPLET
+--------------------------------------------------------------------------------
+
+CONTEXTE
+  Ajout d'un système d'authentification multi-utilisateurs style Netflix.
+  PostgreSQL installé sur le VPS. Gil (admin) et Riri (member) conservent leurs IDs.
+  FamilyChat transformé en app multi-profils avec grille de sélection.
+
+DÉCISIONS TECHNIQUES
+  - Tokens UUID 64 chars, stockés en DB (user_sessions), TTL 7 jours
+  - BCrypt cost 12 pour les mots de passe
+  - Spring Data JPA + ddl-auto=update (auto-création des tables au démarrage)
+  - DataInitializer : crée Gil et Riri au premier démarrage si absents
+  - Nettoyage sessions expirées : @Scheduled tous les jours à 3h
+  - Avatars : ImageIO Java, redimensionné 200x200, stocké /opt/familychat-avatars/
+  - FamilyChat : token dans localStorage + cookie (middleware Next.js)
+  - Routes /chat, /profile, /admin protégées par middleware Next.js
+  - Routes API Next.js proxifient vers GilmoBrain avec X-Brain-Token
+
+MOTS DE PASSE INITIAUX
+  Gil   → GilAdmin2025x  (à changer via /profile !)
+  Riri  → Riri2025x      (à changer via /profile !)
+
+FICHIERS BACKEND (nouveaux)
+  src/main/java/be/gilmotech/brain/users/ — 14 fichiers
+    User, UserSession (entités JPA)
+    UserRepository, UserSessionRepository
+    dto/ : LoginRequest/Response, UserProfileDto, CreateUserRequest,
+            UpdateUserRequest, ChangePasswordRequest
+    AuthService, UserService, AuthController, UserController
+  src/main/java/be/gilmotech/brain/config/DataInitializer.java
+  pom.xml, application.properties, AppConfig.java, AgentController.java modifiés
+  nginx-gilmotech-brain.conf → +location /avatars/
+
+FICHIERS FRONTEND (nouveaux)
+  lib/auth.ts, hooks/useAuth.ts, middleware.ts
+  app/page.tsx → grille profils, app/chat/page.tsx → chat déplacé
+  app/login/[userId]/page.tsx, app/profile/page.tsx, app/admin/users/page.tsx
+  app/api/auth/login|logout|me, app/api/users/[userId]/avatar|password
+
+RÉSULTATS
+  → Frontend build OK (npm run build) — PM2 restart OK
+  → Backend build en attente (sudo rm -rf target requis — fichiers root)
+
+ACTIONS MANUELLES REQUISES
+  1. sudo rm -rf /opt/gilmotech-brain/target
+  2. cd /opt/gilmotech-brain && bash deploy.sh
+  3. sudo mkdir -p /opt/familychat-avatars && sudo chown claude-worker:claude-worker /opt/familychat-avatars
+  4. sudo cp nginx-gilmotech-brain.conf /etc/nginx/sites-available/brain.gilmotech.be
+     sudo nginx -t && sudo systemctl reload nginx
+
+CE QUI RESTE À FAIRE
+  - Exécuter les actions manuelles ci-dessus
+  - Changer les mots de passe de Gil et Riri via /profile
+  - Connecter OpenHands à l'API
+  - Implémenter mémoires partagées famille (table memories)
+
 ================================================================================
 COMMENT REPRENDRE CE PROJET DANS UNE FUTURE SESSION
 ================================================================================
